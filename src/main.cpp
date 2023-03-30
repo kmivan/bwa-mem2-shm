@@ -102,6 +102,11 @@ int main(int argc, char* argv[])
 		tprof[MEM][0] = __rdtsc() - tim;
 		//return ret;
 	}
+	else if (strcmp(argv[1], "shm") == 0)
+	{
+		shm(argc-1, argv+1);
+		return 0;
+	}
 	else if (strcmp(argv[1], "version") == 0)
 	{
 		puts(PACKAGE_VERSION);

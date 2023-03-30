@@ -3,3 +3,7 @@
 *.dSYM
 .*.swp
 a.out
+/bwa-mem2*
+/bwa-mem3*
+build
+.vscode

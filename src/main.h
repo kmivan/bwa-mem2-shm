@@ -38,6 +38,7 @@ Contacts: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@
 #include "macro.h"
 #include "bandedSWA.h"
 #include "profiling.h"
+#include "shared_memory.h"
 // #if MPI_ENABLED
 // #include <mpi.h>
 // #endif

@@ -38,6 +38,7 @@ Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@i
 #include <sstream>
 #include "fastmap.h"
 #include "FMI_search.h"
+#include "shared_memory.h"
 // #include "fasta_file.h"
 #if 0 && (__linux__)
 #include <sys/sysinfo.h>
@@ -610,6 +611,7 @@ static void usage(const mem_opt_t *opt)
 	fprintf(stderr, "Usage: bwa2 mem [options] <idxbase> <in1.fq> [in2.fq]\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Algorithm options:\n");
+	fprintf(stderr, "    -b            Use shared memory\n");
 	fprintf(stderr, "    -o STR        Output SAM file name\n");
 	fprintf(stderr, "    -t INT        number of threads [%d]\n", opt->n_threads);
 	fprintf(stderr, "    -k INT        minimum seed length [%d]\n", opt->min_seed_len);
@@ -680,9 +682,10 @@ int main_mem(int argc, char *argv[])
 	memset(&opt0, 0, sizeof(mem_opt_t));
 	
 	/* Parse input arguments */
-	while ((c = getopt(argc, argv, "1paMCSPVYjk:c:v:s:r:t:R:A:B:O:E:U:w:L:d:T:Q:D:m:I:N:W:x:G:h:y:K:X:H:o:q:")) >= 0)
+	while ((c = getopt(argc, argv, "1paMCSPVYjbk:c:v:s:r:t:R:A:B:O:E:U:w:L:d:T:Q:D:m:I:N:W:x:G:h:y:K:X:H:o:q:")) >= 0)
 	{
 		if (c == 'k') opt->min_seed_len = atoi(optarg), opt0.min_seed_len = 1;
+		else if (c == 'b') opt->use_shared_memory = true;
 		else if (c == '1') no_mt_io = 1;
 		else if (c == 'x') mode = optarg;
 		else if (c == 'w') opt->w = atoi(optarg), opt0.w = 1;
@@ -893,7 +896,7 @@ int main_mem(int argc, char *argv[])
 		uint64_t tim = __rdtsc();
 
 		fprintf(stderr, "Ref file: %s\n", argv[optind]);			
-		fmi = new FMI_search(argv[optind]);
+		fmi = new FMI_search(argv[optind], opt->use_shared_memory);
 		tprof[FMI][0] += __rdtsc() - tim;
 		
 		// reading ref string from the file
@@ -903,28 +906,37 @@ int main_mem(int argc, char *argv[])
         char binary_seq_file[200];
         sprintf(binary_seq_file, "%s.0123", argv[optind]);
 		
-		fprintf(stderr, "Binary seq file = %s\n", binary_seq_file);
-		FILE *fr = fopen(binary_seq_file, "r");
-		
-		if (fr == NULL) {
-			fprintf(stderr, "Error: can't open %s input file\n", binary_seq_file);
-			exit(0);
+		if (opt->use_shared_memory)
+		{
+			fprintf(stderr, "Binary seq file (from shared memory) = %s\n", binary_seq_file);
+			long len;
+			ref_string = (uint8_t*) get_file_from_shm(binary_seq_file, len);
 		}
-		
-		int64_t rlen = 0;
-		fseek(fr, 0, SEEK_END); 
-		rlen = ftell(fr);
-		ref_string = (uint8_t*) _mm_malloc(rlen, 64);
-		rewind(fr);
+		else
+		{
+			fprintf(stderr, "Binary seq file = %s\n", binary_seq_file);
+			FILE *fr = fopen(binary_seq_file, "r");
+			
+			if (fr == NULL) {
+				fprintf(stderr, "Error: can't open %s input file\n", binary_seq_file);
+				exit(0);
+			}
+			
+			int64_t rlen = 0;
+			fseek(fr, 0, SEEK_END); 
+			rlen = ftell(fr);
+			ref_string = (uint8_t*) _mm_malloc(rlen, 64);
+			rewind(fr);
 
-		/* Reading ref. sequence */
-		fread(ref_string, 1, rlen, fr);
+			/* Reading ref. sequence */
+			fread(ref_string, 1, rlen, fr);
 
-		uint64_t timer  = __rdtsc();
-		tprof[REF_IO][0] += timer - tim;
-		
-		fclose(fr);
-		fprintf(stderr, "Reference genome size: %ld bp\n", rlen);
+			uint64_t timer  = __rdtsc();
+			tprof[REF_IO][0] += timer - tim;
+			
+			fclose(fr);
+			fprintf(stderr, "Reference genome size: %ld bp\n", rlen);
+		}
 		fprintf(stderr, "Done readng reference genome !!\n\n");
 	}
 
@@ -998,7 +1010,8 @@ int main_mem(int argc, char *argv[])
 	tprof[PROCESS][0] += __rdtsc() - tim;
 
 	// free memory
-	_mm_free(ref_string);
+	if (!opt->use_shared_memory)
+		_mm_free(ref_string);
 	free(hdr_line);
 	free(opt);
 	kseq_destroy(aux.ks);	

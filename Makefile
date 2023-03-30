@@ -1,7 +1,7 @@
 ##/*************************************************************************************
 ##                           The MIT License
 ##
-##   BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
+##   bwa-mem2  (Sequence alignment using Burrows-Wheeler Transform),
 ##   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
 ##
 ##   Permission is hereby granted, free of charge, to any person obtaining
@@ -28,14 +28,14 @@
 ##                                Heng Li <hli@jimmy.harvard.edu> 
 ##*****************************************************************************************/
 
-EXE=		bwa-mem2
+EXE=		bwa-mem3
 #CXX=		icpc
 ARCH_FLAGS=	-msse4.1
 SWA_FLAGS=	-DDEB=0 -DRDT=0 -DMAXI=0 -DNEW=1 -DSORT_PAIRS=0
 MEM_FLAGS=	-DPAIRED_END=1 -DMAINY=0 -DSAIS=1
 CPPFLAGS=	-DENABLE_PREFETCH $(MEM_FLAGS) $(SWA_FLAGS) 
-LIBS=		-lpthread -lm -lz -L. -lbwa ##-lnuma
-OBJS=		src/fastmap.o src/bwtindex.o src/utils.o src/kthread.o \
+LIBS=		-lpthread -lm -lz -L. -lbwa -lrt ##-lnuma
+OBJS=		src/shared_memory.o src/fastmap.o src/bwtindex.o src/utils.o src/kthread.o \
 			src/kstring.o src/ksw.o src/bntseq.o src/bwamem.o src/profiling.o src/bandedSWA.o \
 			src/FMI_search.o src/read_index_ele.o src/bwamem_pair.o src/kswv.o src/bwa.o \
 			src/bwamem_extra.o src/bwtbuild.o
@@ -77,10 +77,10 @@ CXXFLAGS=	-g -O3 -fpermissive $(ARCH_FLAGS) #-Wall ##-xSSE2
 all:$(EXE)
 
 multi:
-	rm -f src/*.o $(BWA_LIB); $(MAKE) arch=sse    EXE=bwa-mem2.sse41    CXX=$(CXX) all
-	rm -f src/*.o $(BWA_LIB); $(MAKE) arch=avx2   EXE=bwa-mem2.avx2     CXX=$(CXX) all
-	rm -f src/*.o $(BWA_LIB); $(MAKE) arch=avx512 EXE=bwa-mem2.avx512bw CXX=$(CXX) all
-	$(CXX) -Wall -O3 src/runsimd.cpp -o bwa-mem2
+	rm -f src/*.o $(BWA_LIB); $(MAKE) arch=sse    EXE=bwa-mem3.sse41    CXX=$(CXX) all
+	rm -f src/*.o $(BWA_LIB); $(MAKE) arch=avx2   EXE=bwa-mem3.avx2     CXX=$(CXX) all
+	rm -f src/*.o $(BWA_LIB); $(MAKE) arch=avx512 EXE=bwa-mem3.avx512bw CXX=$(CXX) all
+	$(CXX) -Wall -O3 src/runsimd.cpp -o bwa-mem3
 
 $(EXE):$(BWA_LIB) src/main.o
 	$(CXX) $(CXXFLAGS) src/main.o $(BWA_LIB) $(LIBS) -o $@
@@ -89,7 +89,7 @@ $(BWA_LIB):$(OBJS)
 	ar rcs $(BWA_LIB) $(OBJS)
 
 clean:
-	rm -fr src/*.o $(BWA_LIB) $(EXE) bwa-mem2.sse41 bwa-mem2.avx2 bwa-mem2.avx512bw
+	rm -fr src/*.o $(BWA_LIB) $(EXE) bwa-mem3.sse41 bwa-mem3.avx2 bwa-mem3.avx512bw
 
 depend:
 	(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CXXFLAGS) $(CPPFLAGS) -I. -- src/*.cpp)
@@ -135,3 +135,4 @@ src/profiling.o: src/macro.h
 src/read_index_ele.o: src/read_index_ele.h src/utils.h src/bntseq.h
 src/read_index_ele.o: src/macro.h
 src/utils.o: src/utils.h src/ksort.h src/kseq.h
+src/shared_memory.o: src/shared_memory.h src/FMI_search.h

@@ -29,53 +29,88 @@ Authors: Sanchit Misra <sanchit.misra@intel.com>; Vasimuddin Md <vasimuddin.md@i
 
 #include <stdio.h>
 #include "FMI_search.h"
+#include "shared_memory.h"
 
 extern int myrank, num_ranks;
 
-FMI_search::FMI_search(char *ref_file_name)
+FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
 {
+    this->use_shared_memory = use_shared_memory;
     fprintf(stderr, "Entering FMI_search\n");
     //beCalls = 0;
     char cp_file_name[1000];
     assert(strnlen(ref_file_name, 1000) + 12 < 1000);
-#if ((!__AVX2__))
-    sprintf(cp_file_name, "%s.bwt.2bit.%d", ref_file_name, CP_BLOCK_SIZE);
-#else
-    sprintf(cp_file_name, "%s.bwt.8bit.%d", ref_file_name, CP_BLOCK_SIZE);
-#endif
+// #if ((!__AVX2__))
+//     sprintf(cp_file_name, "%s.bwt.2bit.%d", ref_file_name, CP_BLOCK_SIZE);
+// #else
+//     sprintf(cp_file_name, "%s.bwt.8bit.%d", ref_file_name, CP_BLOCK_SIZE);
+// #endif
+    sprintf(cp_file_name, "%s" CP_FILE_SUFFIX, ref_file_name);
     // Read the BWT and FM index of the reference sequence
-    FILE *cpstream = NULL;
-    cpstream = fopen(cp_file_name,"rb");
-    if (cpstream == NULL)
+    if (use_shared_memory)
     {
-		fprintf(stderr, "ERROR! Unable to open the file: %s\n", cp_file_name);
-		exit(0);
+        long len;
+        void *data = get_file_from_shm(cp_file_name, len);
+
+        reference_seq_len = *(int64_t*) data;
+        assert(reference_seq_len > 0);
+        assert(reference_seq_len <= (0xffffffffU * (int64_t)CP_BLOCK_SIZE));
+        if(myrank == 0)
+            fprintf(stderr, "reference seq len = %ld\n", reference_seq_len);
+
+        // create checkpointed occ
+        memcpy(count, (int64_t*) data + 1, 5 * sizeof(int64_t));
+        int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
+        cp_occ = (CP_OCC *) ((int64_t*) data + 6);
+
+        int64_t ii = 0;
+        for(ii = 0; ii < 5; ii++)// update read count structure
+        {
+            count[ii] = count[ii] + 1;
+        }
+
+        sa_ms_byte = (int8_t*) (cp_occ + cp_occ_size);
+        sa_ls_word = (uint32_t*) (sa_ms_byte + reference_seq_len);
+
+        fprintf(stderr, "%p %ld\n", cp_occ, (unsigned long) cp_occ % 64l);
+        fprintf(stderr, "%p %ld\n", sa_ms_byte, (unsigned long) sa_ms_byte % 64l);
+        fprintf(stderr, "%p %ld\n", sa_ls_word, (unsigned long) sa_ls_word % 64l);
     }
-
-    fread(&reference_seq_len, sizeof(int64_t), 1, cpstream);
-    assert(reference_seq_len > 0);
-    assert(reference_seq_len <= (0xffffffffU * (int64_t)CP_BLOCK_SIZE));
-	if(myrank == 0)
-		fprintf(stderr, "reference seq len = %ld\n", reference_seq_len);
-
-    // create checkpointed occ
-    int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
-    cp_occ = NULL;
-
-    fread(&count[0], sizeof(int64_t), 5, cpstream);
-    cp_occ = (CP_OCC *)_mm_malloc(cp_occ_size * sizeof(CP_OCC), 64);
-
-    fread(cp_occ, sizeof(CP_OCC), cp_occ_size, cpstream);
-    int64_t ii = 0;
-    for(ii = 0; ii < 5; ii++)// update read count structure
+    else
     {
-        count[ii] = count[ii] + 1;
+        FILE *cpstream = NULL;
+        cpstream = fopen(cp_file_name,"rb");
+        if (cpstream == NULL)
+        {
+            fprintf(stderr, "ERROR! Unable to open the file: %s\n", cp_file_name);
+            exit(0);
+        }
+
+        fread(&reference_seq_len, sizeof(int64_t), 1, cpstream);
+        assert(reference_seq_len > 0);
+        assert(reference_seq_len <= (0xffffffffU * (int64_t)CP_BLOCK_SIZE));
+        if(myrank == 0)
+            fprintf(stderr, "reference seq len = %ld\n", reference_seq_len);
+
+        // create checkpointed occ
+        int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
+        cp_occ = NULL;
+
+        fread(&count[0], sizeof(int64_t), 5, cpstream);
+        cp_occ = (CP_OCC *)_mm_malloc(cp_occ_size * sizeof(CP_OCC), 64);
+
+        fread(cp_occ, sizeof(CP_OCC), cp_occ_size, cpstream);
+        int64_t ii = 0;
+        for(ii = 0; ii < 5; ii++)// update read count structure
+        {
+            count[ii] = count[ii] + 1;
+        }
+        sa_ms_byte = (int8_t *)_mm_malloc(reference_seq_len * sizeof(int8_t), 64);
+        sa_ls_word = (uint32_t *)_mm_malloc(reference_seq_len * sizeof(uint32_t), 64);
+        fread(sa_ms_byte, sizeof(int8_t), reference_seq_len, cpstream);
+        fread(sa_ls_word, sizeof(uint32_t), reference_seq_len, cpstream);
+        fclose(cpstream);
     }
-    sa_ms_byte = (int8_t *)_mm_malloc(reference_seq_len * sizeof(int8_t), 64);
-    sa_ls_word = (uint32_t *)_mm_malloc(reference_seq_len * sizeof(uint32_t), 64);
-    fread(sa_ms_byte, sizeof(int8_t), reference_seq_len, cpstream);
-    fread(sa_ls_word, sizeof(uint32_t), reference_seq_len, cpstream);
-    fclose(cpstream);
 
     sentinel_index = -1;
     int64_t x;
@@ -109,7 +144,7 @@ FMI_search::FMI_search(char *ref_file_name)
     base_mask[3][1] = 0xffffffffffffffffL;
 #else
     c_bcast_array = (uint8_t *)_mm_malloc(256 * sizeof(uint8_t), 64);
-    for(ii = 0; ii < 4; ii++)
+    for(int64_t ii = 0; ii < 4; ii++)
     {
         int32_t j;
         for(j = 0; j < 64; j++)
@@ -123,9 +158,12 @@ FMI_search::FMI_search(char *ref_file_name)
 
 FMI_search::~FMI_search()
 {
-    _mm_free(sa_ms_byte);
-    _mm_free(sa_ls_word);
-    _mm_free(cp_occ);
+    if (!use_shared_memory)
+    {
+        _mm_free(sa_ms_byte);
+        _mm_free(sa_ls_word);
+        _mm_free(cp_occ);
+    }
 #if ((__AVX2__))
     _mm_free(c_bcast_array);
 #endif

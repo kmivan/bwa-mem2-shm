@@ -46,6 +46,10 @@ Authors: Sanchit Misra <sanchit.misra@intel.com>; Vasimuddin Md <vasimuddin.md@i
 #define BIT_DATA_TYPE uint64_t
 #define PADDING 8
 
+#define _CP_FILE_SUFFIX_(_CP_BLOCK_SIZE) ".bwt.2bit." #_CP_BLOCK_SIZE
+#define _CP_FILE_SUFFIX(_CP_BLOCK_SIZE) _CP_FILE_SUFFIX_(_CP_BLOCK_SIZE)
+#define CP_FILE_SUFFIX _CP_FILE_SUFFIX(CP_BLOCK_SIZE)
+
 #if defined(__clang__) || defined(__GNUC__)
 static inline int _mm_countbits_64(unsigned long x) {
 	return __builtin_popcountl(x);
@@ -82,6 +86,10 @@ typedef struct checkpoint_occ
 #define CP_BLOCK_SIZE 32
 #define CP_MASK 31
 #define CP_SHIFT 5
+
+#define _CP_FILE_SUFFIX_(_CP_BLOCK_SIZE) ".bwt.8bit." #_CP_BLOCK_SIZE
+#define _CP_FILE_SUFFIX(_CP_BLOCK_SIZE) _CP_FILE_SUFFIX_(_CP_BLOCK_SIZE)
+#define CP_FILE_SUFFIX _CP_FILE_SUFFIX(CP_BLOCK_SIZE)
 
 #if defined(__clang__) || defined(__GNUC__)
 static inline int _mm_countbits_32(unsigned x) {
@@ -124,7 +132,7 @@ typedef struct smem_struct
 class FMI_search: public indexEle
 {
 public:
-	FMI_search(char *fmi_file_name);
+	FMI_search(char *fmi_file_name, bool use_shared_memory);
 	~FMI_search();
 	//int64_t beCalls;
 	
@@ -193,6 +201,7 @@ private:
 #else
         uint8_t *c_bcast_array;
 #endif
+        bool use_shared_memory;
 
         SMEM backwardExt(SMEM smem, uint8_t a);
 };
