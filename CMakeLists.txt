@@ -8,19 +8,33 @@ set(CMAKE_CXX_STANDARD 11)
 include_directories(src)
 include_directories(ext/safestringlib/include)
 
-add_compile_options(-mavx512bw 
-                    -DENABLE_PREFETCH 
-                    -DDEB=0 -DRDT=0 -DMAXI=0 -DNEW=1 -DSORT_PAIRS=0
-                    -DPAIRED_END=1 -DMAINY=0 -DSAIS=1)
-
 aux_source_directory(src SRC)
 list(REMOVE_ITEM SRC src/runsimd.cpp)
-add_executable(${PROJECT_NAME} ${SRC})
-target_link_libraries(${PROJECT_NAME} pthread m z safestring_static rt)
 
+set(common_options ${COMPILE_OPTIONS} -DENABLE_PREFETCH 
+                   -DDEB=0 -DRDT=0 -DMAXI=0 -DNEW=1 -DSORT_PAIRS=0
+                   -DPAIRED_END=1 -DMAINY=0 -DSAIS=1)
+set(architectures sse4.1 sse4.2 avx avx2 avx512bw avx512f)
+
+foreach(x IN LISTS abc)
+    message(${x})
+endforeach()
+
+foreach(arch IN LISTS architectures)
+    add_compile_options(${common_options} -m${arch})
+    add_executable(${PROJECT_NAME}.${arch} ${SRC})
+    target_link_libraries(${PROJECT_NAME}.${arch} pthread m z safestring_static rt)
+endforeach()
+add_executable(${PROJECT_NAME} src/runsimd.cpp)
+
+
+set(install_targets ${PROJECT_NAME})
+foreach(arch IN LISTS architectures)
+    list(APPEND install_targets ${PROJECT_NAME}.${arch})
+endforeach()
 
 install(
-    TARGETS ${PROJECT_NAME}
+    TARGETS ${install_targets}
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin 
 )

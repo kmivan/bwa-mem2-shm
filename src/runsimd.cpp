@@ -167,8 +167,8 @@ int main(int argc, char *argv[])
 	if (simd & SIMD_AVX512F) test_and_launch(argv, prefix_len, prefix, ".avx512f");
 	if (simd & SIMD_AVX2) test_and_launch(argv, prefix_len, prefix, ".avx2");
 	if (simd & SIMD_AVX) test_and_launch(argv, prefix_len, prefix, ".avx");
-	if (simd & SIMD_SSE4_2) test_and_launch(argv, prefix_len, prefix, ".sse42");
-	if (simd & SIMD_SSE4_1) test_and_launch(argv, prefix_len, prefix, ".sse41");
+	if (simd & SIMD_SSE4_2) test_and_launch(argv, prefix_len, prefix, ".sse4.2");
+	if (simd & SIMD_SSE4_1) test_and_launch(argv, prefix_len, prefix, ".sse4.1");
 	if (simd & SIMD_SSE2) test_and_launch(argv, prefix_len, prefix, ".sse2");
 	if (simd & SIMD_SSE) test_and_launch(argv, prefix_len, prefix, ".sse");
 	free(prefix);
