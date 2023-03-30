@@ -49,10 +49,11 @@ FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
     // Read the BWT and FM index of the reference sequence
     if (use_shared_memory)
     {
-        long len;
-        void *data = get_file_from_shm(cp_file_name, len);
+        IndexShmInfo info;
+        char *data = (char*) get_file_from_shm(cp_file_name, info);
 
         reference_seq_len = *(int64_t*) data;
+        int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
         assert(reference_seq_len > 0);
         assert(reference_seq_len <= (0xffffffffU * (int64_t)CP_BLOCK_SIZE));
         if(myrank == 0)
@@ -60,21 +61,27 @@ FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
 
         // create checkpointed occ
         memcpy(count, (int64_t*) data + 1, 5 * sizeof(int64_t));
-        int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
-        cp_occ = (CP_OCC *) ((int64_t*) data + 6);
-
+        data += sizeof(int64_t) * 6;
         int64_t ii = 0;
         for(ii = 0; ii < 5; ii++)// update read count structure
         {
             count[ii] = count[ii] + 1;
         }
 
-        sa_ms_byte = (int8_t*) (cp_occ + cp_occ_size);
-        sa_ls_word = (uint32_t*) (sa_ms_byte + reference_seq_len);
+        data += info.pad_before_cp_occ;
+        cp_occ = (CP_OCC *) data;
+        data += cp_occ_size * sizeof(CP_OCC);
+        
+        data += info.pad_before_ls_word;
+        sa_ms_byte = (int8_t*) data;
+        data += reference_seq_len * sizeof(int8_t);
 
-        fprintf(stderr, "%p %ld\n", cp_occ, (unsigned long) cp_occ % 64l);
-        fprintf(stderr, "%p %ld\n", sa_ms_byte, (unsigned long) sa_ms_byte % 64l);
-        fprintf(stderr, "%p %ld\n", sa_ls_word, (unsigned long) sa_ls_word % 64l);
+        data += info.pad_before_ms_byte;
+        sa_ls_word = (uint32_t*) data;
+
+        // fprintf(stderr, "%p %ld\n", cp_occ, (unsigned long) cp_occ % 64l);
+        // fprintf(stderr, "%p %ld\n", sa_ms_byte, (unsigned long) sa_ms_byte % 64l);
+        // fprintf(stderr, "%p %ld\n", sa_ls_word, (unsigned long) sa_ls_word % 64l);
     }
     else
     {
