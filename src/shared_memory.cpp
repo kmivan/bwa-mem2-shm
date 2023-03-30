@@ -147,5 +147,25 @@ void shm(int argc, char **argv)
         remove_file(path + ".0123");
         remove_file(path + CP_FILE_SUFFIX);
     }
+    else if (!strcmp(argv[1], "check"))
+    {
+        string ref = string(argv[2]) + ".0123";
+        string index = string(argv[2]) + CP_FILE_SUFFIX;
 
+        if (shmget(ftok(ref.c_str(), SHM_PROJ_ID), 0, 0) > 0)
+        {
+            cout << "YES   " << ref << endl;
+        }
+        else{
+            cout << "NO    " << ref << endl;
+        }
+
+        if (shmget(ftok(index.c_str(), SHM_PROJ_ID), 0, 0) > 0)
+        {
+            cout << "YES   " << index << endl;
+        }
+        else{
+            cout << "NO    " << index << endl;
+        }
+    }
 }
