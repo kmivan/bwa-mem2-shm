@@ -14,6 +14,31 @@ using namespace std;
 const string SHM_PREFIX = "/dev/shm/bwa-mem3-index";
 constexpr int SHM_PROJ_ID = 42;
 
+template <class T>
+T *my_shmat(int shm_id, void *addr, int flags)
+{
+    void *mem = shmat(shm_id, addr, flags);
+    if ((long)mem == -1L)
+    {
+        switch (errno)
+        {
+        case EACCES:
+            cerr << "No permission to attach to shared memory" << endl;
+            exit(1);
+
+        case ENOMEM:
+            cerr << "No memory space left" << endl;
+            exit(1);
+        
+        default:
+            cerr << "Unknown error: " << errno << endl;
+            exit(1);
+        }
+    }
+
+    return (T*) mem;
+}
+
 void *get_file_from_shm(const string &path, IndexShmInfo &info)
 {
     key_t shm_key = ftok(path.c_str(), SHM_PROJ_ID);
@@ -24,11 +49,11 @@ void *get_file_from_shm(const string &path, IndexShmInfo &info)
         exit(1);
     }
 
-    IndexShmInfo *addr = (IndexShmInfo*) shmat(shm_id, NULL, 0);
+    IndexShmInfo *addr = my_shmat<IndexShmInfo>(shm_id, NULL, 0);
     while ((unsigned long) addr % 64 != 0)
     {
         shmdt(addr);
-        addr = (IndexShmInfo*) shmat(shm_id, (void*)(((unsigned long) addr + 63) / 64 * 64), 0);
+        addr = my_shmat<IndexShmInfo>(shm_id, (void*)(((unsigned long) addr + 63) / 64 * 64), 0);
     }
 
     info = *addr;
@@ -37,12 +62,8 @@ void *get_file_from_shm(const string &path, IndexShmInfo &info)
 
 void write_index(ifstream &fs, int shm_id, long file_size)
 {
-    IndexShmInfo *addr = (IndexShmInfo*) shmat(shm_id, NULL, 0);
-    while ((unsigned long) addr % 64 != 0)
-    {
-        shmdt(addr);
-        addr = (IndexShmInfo*) shmat(shm_id, (void*)(((unsigned long) addr + 63) / 64 * 64), 0);
-    }
+    IndexShmInfo *addr = my_shmat<IndexShmInfo>(shm_id, NULL, 0);
+    
     addr->size = file_size;
     addr->pad_before_cp_occ = 16;
     addr->pad_before_ms_byte = 0;
@@ -80,7 +101,7 @@ void add_file(const string &path)
     fs.seekg(0, ios::beg);
 
     key_t shm_key = ftok(path.c_str(), SHM_PROJ_ID);
-    int shm_id = shmget(shm_key, size + sizeof(IndexShmInfo) + 64 * 3, IPC_CREAT | IPC_EXCL);
+    int shm_id = shmget(shm_key, size + sizeof(IndexShmInfo) + 64 * 3, 0777 | IPC_CREAT | IPC_EXCL);
     if (shm_id < 0)
     {
         cerr << "File already on shared memory: " << path << endl;
@@ -89,7 +110,7 @@ void add_file(const string &path)
 
     if (path[path.size() - 1] == '3')
     {
-        IndexShmInfo *addr = (IndexShmInfo*) shmat(shm_id, NULL, 0);
+        IndexShmInfo *addr = my_shmat<IndexShmInfo>(shm_id, NULL, 0);
         addr->size = size;
         addr++;
         fs.read((char*) addr, size);
@@ -112,10 +133,23 @@ void remove_file(const string &path)
     int shm_id = shmget(shm_key, 0, 0);
     if (shm_id < 0)
     {
-        cerr << "File not resided: " << path << endl;
+        cerr << "File not on shared_memory: " << path << endl;
+        return;
     }
 
-    shmctl(shm_id, IPC_RMID, NULL);
+    if (shmctl(shm_id, IPC_RMID, NULL) < 0)
+    {
+        switch (errno)
+        {
+        case EPERM:
+            cerr << "No permission to remove shared memory for " << path << endl;
+            break;
+        
+        default:
+            cerr << "Unexpected error on removing shared memory for " << path << endl;
+            break;
+        }
+    }
 }
 
 void shm(int argc, char **argv)
