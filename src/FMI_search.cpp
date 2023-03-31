@@ -72,11 +72,11 @@ FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
         cp_occ = (CP_OCC *) data;
         data += cp_occ_size * sizeof(CP_OCC);
         
-        data += info.pad_before_ls_word;
+        data += info.pad_before_ms_byte;
         sa_ms_byte = (int8_t*) data;
         data += reference_seq_len * sizeof(int8_t);
 
-        data += info.pad_before_ms_byte;
+        data += info.pad_before_ls_word;
         sa_ls_word = (uint32_t*) data;
 
         // fprintf(stderr, "%p %ld\n", cp_occ, (unsigned long) cp_occ % 64l);
@@ -123,8 +123,10 @@ FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
     int64_t x;
     for(x = 0; x < reference_seq_len; x++)
     {
-        if(get_sa_entry(x) == 0)
+        if(get_sa_entry(x) == 0) {
             sentinel_index = x;
+            break;
+        }
     }
 	if(myrank == 0) {
 		fprintf(stderr, "count\n");

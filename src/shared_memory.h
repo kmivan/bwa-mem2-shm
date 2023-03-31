@@ -5,9 +5,9 @@
 struct IndexShmInfo
 {
     long size;
-    long pad_before_cp_occ;
-    long pad_before_ms_byte;
-    long pad_before_ls_word;
+    int pad_before_cp_occ;
+    int pad_before_ms_byte;
+    int pad_before_ls_word;
 } __attribute__((aligned(64)));
 
 void shm(int argc, char **argv);
