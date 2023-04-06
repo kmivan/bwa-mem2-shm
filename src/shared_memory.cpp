@@ -11,7 +11,6 @@
 
 using namespace std;
 
-const string SHM_PREFIX = "/dev/shm/bwa-mem3-index";
 constexpr int SHM_PROJ_ID = 42;
 
 template <class T>
@@ -131,20 +130,20 @@ void remove_file(const string &path)
 
     key_t shm_key = ftok(path.c_str(), SHM_PROJ_ID);
     int shm_id = shmget(shm_key, 0, 0);
-    if (shm_id < 0)
-    {
-        cerr << "File not on shared_memory: " << path << endl;
-        return;
-    }
 
     if (shmctl(shm_id, IPC_RMID, NULL) < 0)
     {
         switch (errno)
         {
         case EPERM:
-            cerr << "No permission to remove shared memory for " << path << endl;
+            cerr << "No permission to remove shared memory: " << path << endl;
             break;
         
+        case EIDRM:
+        case EINVAL:
+            cerr << "File not on shared memory: " << path << endl;
+            break;
+
         default:
             cerr << "Unexpected error on removing shared memory for " << path << endl;
             break;
@@ -154,7 +153,7 @@ void remove_file(const string &path)
 
 void shm(int argc, char **argv)
 {
-    string usage = "Usage: bwa-mem3 shm (add|remove|check) <prefix>";
+    string usage = "Usage: bwa-mem2-shm shm (add | remove | check) <prefix>";
 
     if (argc != 3)
     {
