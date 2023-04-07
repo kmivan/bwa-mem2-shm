@@ -3,90 +3,101 @@
 
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include <cstring>
 #include <unistd.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 #include <sys/file.h>
 
 using namespace std;
 
-constexpr int SHM_PROJ_ID = 42;
+const string SHM_PREFIX = "/dev/shm/bwa-mem2-index/";
 
-template <class T>
-T *my_shmat(int shm_id, void *addr, int flags)
+string shm_file_path(const string &id, const string &filename)
 {
-    void *mem = shmat(shm_id, addr, flags);
-    if ((long)mem == -1L)
-    {
-        switch (errno)
-        {
-        case EACCES:
-            cerr << "No permission to attach to shared memory" << endl;
-            exit(1);
-
-        case ENOMEM:
-            cerr << "No memory space left" << endl;
-            exit(1);
-        
-        default:
-            cerr << "Unknown error: " << errno << endl;
-            exit(1);
-        }
-    }
-
-    return (T*) mem;
+    return SHM_PREFIX + id + '/' + filename;
 }
 
-void *get_file_from_shm(const string &path, IndexShmInfo &info)
+void *get_index_from_shm(const string &id, IndexShmInfo &info)
 {
-    key_t shm_key = ftok(path.c_str(), SHM_PROJ_ID);
-    int shm_id = shmget(shm_key, 0, 0);
-    if (shm_id < 0)
-    {
-        cerr << "File not on shared memory: " << path << endl;
-        exit(1);
-    }
-
-    IndexShmInfo *addr = my_shmat<IndexShmInfo>(shm_id, NULL, 0);
-    while ((unsigned long) addr % 64 != 0)
-    {
-        shmdt(addr);
-        addr = my_shmat<IndexShmInfo>(shm_id, (void*)(((unsigned long) addr + 63) / 64 * 64), 0);
-    }
+    IndexShmInfo *addr = (IndexShmInfo*) get_file(id, "index." + to_string(CP_BLOCK_SIZE));
 
     info = *addr;
     return addr + 1;
 }
 
-void write_index(ifstream &fs, int shm_id, long file_size)
+void *get_file(const string &id, const string &filename)
 {
-    IndexShmInfo *addr = my_shmat<IndexShmInfo>(shm_id, NULL, 0);
-    
-    addr->size = file_size;
-    addr->pad_before_cp_occ = 16;
-    addr->pad_before_ms_byte = 0;
+    string path = shm_file_path(id, filename);
 
-    char *data = (char*) (addr + 1);
-    fs.read(data, sizeof(int64_t) * 6);
-    int64_t reference_seq_len = *(int64_t*) data;
-    int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
-    addr->pad_before_ls_word = reference_seq_len % 64;
+    ifstream fs(path, ios::binary);
+    if (!fs.is_open())
+    {
+        cerr << "Failed to load index from shared memory: " << id << endl;
+        cerr << "Failed to open file: " << path << endl;
+        exit(1);
+    }
+    fs.seekg(0, ios::end);
+    long size = fs.tellg();
+    fs.close();
 
-    data += sizeof(int64_t) * 6 + addr->pad_before_cp_occ;
-    fs.read(data, cp_occ_size * sizeof(CP_OCC));
-    data += cp_occ_size * sizeof(CP_OCC);
-
-    fs.read(data, reference_seq_len * sizeof(int8_t));
-    data += reference_seq_len * sizeof(int8_t);
-
-    data += addr->pad_before_ls_word;
-    fs.read(data, reference_seq_len * sizeof(uint32_t));
-
-    shmdt(addr);
+    int fd = open(path.c_str(), O_RDONLY, 0);
+    void *addr = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+    while ((unsigned long) addr % 64 != 0)
+    {
+        munmap(addr, size);
+        addr = (void*) (((unsigned long) addr + 63) / 64 * 64);
+        addr = mmap(addr, size, PROT_READ, MAP_SHARED, fd, 0);
+    }
+    return addr;
 }
 
-void add_file(const string &path)
+void write_index(ifstream &fs, ofstream &os)
+{
+    IndexShmInfo info{.pad_before_cp_occ=16, .pad_before_ms_byte=0};
+
+    fs.seekg(0, ios::end);
+    info.size = fs.tellg();
+    fs.seekg(0, ios::beg);
+
+    int64_t meta_info[6];
+    fs.read((char*) &meta_info, sizeof(meta_info));
+    long reference_seq_len = meta_info[0];
+    long cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
+    info.pad_before_ls_word = reference_seq_len % 64L;
+
+    os.write((char*) &info, sizeof(info));
+    os.write((char*) &meta_info, sizeof(meta_info));
+
+    char *buffer = new char[max(reference_seq_len * sizeof(int32_t), cp_occ_size * sizeof(CP_OCC))];
+
+    os.seekp(info.pad_before_cp_occ, ios::cur);
+    fs.read(buffer, cp_occ_size * sizeof(CP_OCC));
+    os.write(buffer, cp_occ_size * sizeof(CP_OCC));
+
+    os.seekp(info.pad_before_ms_byte, ios::cur);
+    fs.read(buffer, reference_seq_len * sizeof(int8_t));
+    os.write(buffer, reference_seq_len * sizeof(int8_t));
+
+    os.seekp(info.pad_before_ls_word, ios::cur);
+    fs.read(buffer, reference_seq_len * sizeof(uint32_t));
+    os.write(buffer, reference_seq_len * sizeof(uint32_t));
+
+    delete[] buffer;
+}
+
+const char *file_suffix(const string &filename)
+{
+    auto it = filename.rbegin();
+    while (*it != '.')
+    {
+        it++;
+    }
+    return &*it;
+}
+
+void add_file(const string &id, const string &path)
 {
     if (access(path.c_str(), F_OK) != 0)
     {
@@ -95,104 +106,79 @@ void add_file(const string &path)
     }
 
     ifstream fs(path, ios::binary);
-    fs.seekg(0, ios::end);
-    long size = fs.tellg();
-    fs.seekg(0, ios::beg);
 
-    key_t shm_key = ftok(path.c_str(), SHM_PROJ_ID);
-    int shm_id = shmget(shm_key, size + sizeof(IndexShmInfo) + 64 * 3, 0777 | IPC_CREAT | IPC_EXCL);
-    if (shm_id < 0)
+    if (*path.rbegin() == '2' || *path.rbegin() == '4')
     {
-        cerr << "File already on shared memory: " << path << endl;
-        return;
-    }
-
-    if (path[path.size() - 1] == '3')
-    {
-        IndexShmInfo *addr = my_shmat<IndexShmInfo>(shm_id, NULL, 0);
-        addr->size = size;
-        addr++;
-        fs.read((char*) addr, size);
+        ofstream os(shm_file_path(id, "index"s + file_suffix(path)), ios::binary);
+        write_index(fs, os);
+        os.close();
     }
     else {
-        write_index(fs, shm_id, size);
+        string &&shm_path = shm_file_path(id, "ref"s + file_suffix(path));
+        system(("cp " + path + " " + shm_path).c_str());
     }
     fs.close();
 }
 
-void remove_file(const string &path)
+void remove(const string &id)
 {
-    if (access(path.c_str(), F_OK) != 0)
+    string shm_path = SHM_PREFIX + id;
+    if (access(shm_path.c_str(), F_OK) != 0)
     {
-        cerr << "File not exist: " << path << endl;
+        cerr << "Not on shared memory: " << id << endl;
         exit(1);
     }
-
-    key_t shm_key = ftok(path.c_str(), SHM_PROJ_ID);
-    int shm_id = shmget(shm_key, 0, 0);
-
-    if (shmctl(shm_id, IPC_RMID, NULL) < 0)
-    {
-        switch (errno)
-        {
-        case EPERM:
-            cerr << "No permission to remove shared memory: " << path << endl;
-            break;
-        
-        case EIDRM:
-        case EINVAL:
-            cerr << "File not on shared memory: " << path << endl;
-            break;
-
-        default:
-            cerr << "Unexpected error on removing shared memory for " << path << endl;
-            break;
-        }
-    }
+    system(("rm -rf " + shm_path).c_str());
 }
 
 void shm(int argc, char **argv)
 {
     string usage = "Usage: bwa-mem2-shm shm (add | remove | check) <prefix>";
 
-    if (argc != 3)
+    if (argc < 3)
     {
         cerr << usage << endl << endl;
+        return;
     }
-    else if (!strcmp(argv[1], "add"))
+
+    string &&id = argv[2];
+
+    if (!strcmp(argv[1], "add"))
     {
         cerr << "Loading index to shared memory..." << endl;
 
-        string &&path = argv[2];
-        add_file(path + ".0123");
-        add_file(path + CP_FILE_SUFFIX);
+        if (access((SHM_PREFIX + id).c_str(), F_OK) == 0)
+        {
+            system(("rm -rf " + SHM_PREFIX + id).c_str());
+        }
+
+        string &&path = argv[3];
+        mkdir((SHM_PREFIX).c_str(), 0777);
+        mkdir((SHM_PREFIX + id).c_str(), 0777);
+        add_file(id, path + ".0123");
+        add_file(id, path + ".pac");
+        add_file(id, path + ".ann");
+        add_file(id, path + ".amb");
+        add_file(id, path + CP_FILE_SUFFIX);
     }
     else if (!strcmp(argv[1], "remove"))
     {
         cerr << "Removing file from shared memory..." << endl;
-        string &&path = argv[2];
-        remove_file(path + ".0123");
-        remove_file(path + CP_FILE_SUFFIX);
+        remove(id);
     }
     else if (!strcmp(argv[1], "check"))
     {
-        string ref = string(argv[2]) + ".0123";
-        string index = string(argv[2]) + CP_FILE_SUFFIX;
-
-        if (shmget(ftok(ref.c_str(), SHM_PROJ_ID), 0, 0) > 0)
-        {
-            cout << "YES   " << ref << endl;
-        }
-        else{
-            cout << "NO    " << ref << endl;
-        }
-
-        if (shmget(ftok(index.c_str(), SHM_PROJ_ID), 0, 0) > 0)
-        {
-            cout << "YES   " << index << endl;
-        }
-        else{
-            cout << "NO    " << index << endl;
+        string &&shm_path = SHM_PREFIX + id + '/';
+        static const char *files[] {"index.32", "index.64", "ref.0123", "ref.pac", "ref.ann", "ref.amb"};
+        for (auto f : files) {
+            if (access((shm_path + f).c_str(), F_OK) == 0)
+            {
+                cerr << "YES   " << shm_path << f << endl;
+            }
+            else
+            {
+                cerr << "NO    " << shm_path << f << endl;
+            }
         }
     }
     else

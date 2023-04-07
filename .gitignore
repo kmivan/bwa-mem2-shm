@@ -7,4 +7,5 @@ a.out
 /bwa-mem3*
 build
 .vscode
-
+.idea
+cmake-build-*

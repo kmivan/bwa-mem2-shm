@@ -50,7 +50,7 @@ FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
     if (use_shared_memory)
     {
         IndexShmInfo info;
-        char *data = (char*) get_file_from_shm(cp_file_name, info);
+        char *data = (char*) get_index_from_shm(ref_file_name, info);
 
         reference_seq_len = *(int64_t*) data;
         int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
@@ -140,7 +140,14 @@ FMI_search::FMI_search(char *ref_file_name, bool use_shared_memory)
 
 	fprintf(stderr, "Reading other elements of the index from files %s\n",
 			ref_file_name);
-	bwa_idx_load_ele(ref_file_name, BWA_IDX_ALL);
+    if (use_shared_memory)
+    {
+        bwa_idx_load_ele(shm_file_path(ref_file_name, "ref").c_str(), BWA_IDX_ALL);
+    }
+    else
+    {
+	    bwa_idx_load_ele(ref_file_name, BWA_IDX_ALL);
+    }
 
 #if ((!__AVX2__))
     base_mask[0][0] = 0;

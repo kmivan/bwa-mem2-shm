@@ -908,9 +908,8 @@ int main_mem(int argc, char *argv[])
 		
 		if (opt->use_shared_memory)
 		{
-			fprintf(stderr, "Binary seq file (from shared memory) = %s\n", binary_seq_file);
-			IndexShmInfo info;
-			ref_string = (uint8_t*) get_file_from_shm(binary_seq_file, info);
+			fprintf(stderr, "Binary seq file (from shared memory)\n");
+			ref_string = (uint8_t*) get_file(argv[optind], "ref.0123");
 		}
 		else
 		{
