@@ -2,7 +2,7 @@
                            The MIT License
 
    BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
-   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
+   Copyright (C) 2019  Intel Corporation, Heng Li.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -33,11 +33,10 @@ Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@i
 #include <stdlib.h>
 #include <stdint.h>
 #include <assert.h>
-// #include <emmintrin.h>
 #include "macro.h"
+
 #if !MAINY
 #include "ksw.h"
-// #include "bwamem.h"
 #include "bandedSWA.h"
 #else
 #include <immintrin.h>
@@ -53,7 +52,6 @@ Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@i
 
 
 #define MAX_SEQ_LEN_REF_SAM 2048
-// #define MAX_SEQ_LEN_QER_SAM 256
 #define MAX_SEQ_LEN_QER_SAM 512
 
 #if MAINY
@@ -62,14 +60,10 @@ Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@i
 #define KSW_XSUBO  0x40000
 #define KSW_XSTART 0x80000
 
-// extern uint64_t proc_freq, tprof[LIM_R][LIM_C];
-
 #ifdef USE_MALLOC_WRAPPERS
 #  include "malloc_wrap.h"
 #endif
 
-
-// #define MAX_SEQ_LEN8 256
 
 #define MAX_SEQ_LEN_EXT 256
 
@@ -92,8 +86,6 @@ typedef struct dnaSeqPair
 	int32_t len1, len2;
 	int32_t h0;
 	int seqid, regid;
-	// int32_t score, tle, gtle, qle;
-	// int32_t gscore, max_off;
 	int score; // best score
 	int te, qe; // target end and query end
 	int score2, te2; // second best score and ending position on the target
@@ -129,27 +121,14 @@ const kswr_t g_defr = { 0, -1, -1, -1, -1, -1, -1 };
 #define DP2 8
 #define DP3 9
 
-#else
-
-//extern struct _kswq_t;
-extern const kswr_t g_defr;
-
 #endif
-
-// typedef struct {
-// 	int qlen, slen;
-// 	uint8_t shift, mdiff, max, size;
-// 	__m512i *qp, *H0, *H1, *E, *Hmax;
-// } kswqi_t;
-
 
 class kswv {
 public:
-	uint64_t SW_cells;
 
 	kswv(const int o_del, const int e_del, const int o_ins,
-		 const int e_ins, int8_t w_match, int8_t w_mismatch,
-		 int numThreads);
+		 const int e_ins, const int8_t w_match, const int8_t w_mismatch,
+		 int numThreads, int32_t maxRefLen, int32_t maxQerLen);
 	
 	~kswv();
 
@@ -168,30 +147,16 @@ public:
 					 int32_t numPairs,
 					 uint16_t numThreads,
 					 int phase);
-
-	void kswvScalaWrapper(SeqPair *seqPairArray,
-						  uint8_t *seqBufRef,
-						  uint8_t *seqBufQer,
-						  kswr_t* aln,
-						  int numPairs,
-						  int nthreads);
+    
+	void kswvScalarWrapper(SeqPair *seqPairArray,
+                           uint8_t *seqBufRef,
+                           uint8_t *seqBufQer,
+                           kswr_t* aln,
+                           int numPairs,
+                           int nthreads,
+                           bool sw, int tid);
 
 	kswq_t* ksw_qinit(int size, int qlen, uint8_t *query, int m, const int8_t *mat);
-	// kswqi_t* ksw_qinit_intra(int size, int qlen, uint8_t *query, int m, const int8_t *mat);
-	// void kswvBatchWrapper16_intra(SeqPair *pairArray,
-	// 							  uint8_t *seqBufRef,
-	// 							  uint8_t *seqBufQer,
-	// 							  int32_t numPairs,
-	// 							  uint16_t numThreads);
-	// 
-	// kswr_t kswv512_16_intra(uint8_t seq1SoA[],
-	// 						kswqi_t *q,
-	// 						int16_t nrow,
-	// 						int16_t ncol,
-	// 						SeqPair *p,
-	// 						uint16_t tid,
-	// 						int32_t numPairs,
-	// 						int &maxi);
 	
 private:
 #if __AVX512BW__
@@ -213,7 +178,7 @@ private:
 				   uint16_t tid,
 				   int32_t numPairs,
 				   int phase);
-	
+    
 	void kswvBatchWrapper16(SeqPair *pairArray,
 							uint8_t *seqBufRef,
 							uint8_t *seqBufQer,
@@ -222,45 +187,26 @@ private:
 							uint16_t numThreads,
 							int phase);
 	
-	int kswv512_16_exp(int16_t seq1SoA[],
-					   int16_t seq2SoA[],
-					   int16_t nrow,
-					   int16_t ncol,
-					   SeqPair *p,
-					   kswr_t* aln,
-					   int po_ind,
-					   uint16_t tid,
-					   int32_t numPairs,
-					   int phase);
-
-	void kswv512_16(int16_t seq1SoA[],
-				   int16_t seq2SoA[],
-				   int16_t nrow,
-				   int16_t ncol,
-				   SeqPair *p,
-				   kswr_t* aln,
-				   int po_ind,
-				   uint16_t tid,
-				   int32_t numPairs);
+	int kswv512_16(int16_t seq1SoA[],
+                   int16_t seq2SoA[],
+                   int16_t nrow,
+                   int16_t ncol,
+                   SeqPair *p,
+                   kswr_t* aln,
+                   int po_ind,
+                   uint16_t tid,
+                   int32_t numPairs,
+                   int phase);
 #endif
 	
 	kswr_t kswvScalar_u8(kswq_t *q, int tlen, const uint8_t *target,
 						int _o_del, int _e_del, int _o_ins, int _e_ins,
 						int xtra);  // the first gap costs -(_o+_e)
-
-	kswr_t kswvScalar_u8_exp(kswq_t *q, int tlen, const uint8_t *target,
-							 int _o_del, int _e_del, int _o_ins, int _e_ins,
-							 int xtra);  // the first gap costs -(_o+_e)
 	
 	kswr_t kswvScalar_i16(kswq_t *q, int tlen, const uint8_t *target,
 						  int _o_del, int _e_del, int _o_ins, int _e_ins,
 						  int xtra); // the first gap costs -(_o+_e)
 	
-	kswr_t kswvScalar_i16_exp(kswq_t *q, int tlen, const uint8_t *target,
-							  int _o_del, int _e_del, int _o_ins, int _e_ins,
-							  int xtra); // the first gap costs -(_o+_e)
-		
-
 	void bwa_fill_scmat(int8_t mat[25]);
 		
 	int m;
@@ -278,9 +224,9 @@ private:
 	
 	int16_t *F16;
 	int16_t *H16_0, *H16_max, *H16_1;
-	// int16_t *qp16;
 	int16_t *rowMax16;
-
+	int32_t maxRefLen, maxQerLen;
+	
 	int g_qmax;
 	int64_t sort1Ticks;
 	int64_t setupTicks;

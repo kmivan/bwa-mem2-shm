@@ -2,7 +2,7 @@
                            The MIT License
 
    BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
-   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
+   Copyright (C) 2019  Intel Corporation, Heng Li.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -44,21 +44,26 @@ Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@i
 #define H0_ -99
 #define SEEDS_PER_READ 500           /* Avg seeds per read */
 #define MAX_SEEDS_PER_READ 500       /* Max seeds per read */
-#define AVG_SEEDS_PER_READ 64       /* Used for storing seeds in chains*/
+#define AVG_SEEDS_PER_READ 64        /* Used for storing seeds in chains*/
 #define BATCH_SIZE 512               /* Block of reads alloacted to a thread for processing*/
 #define BATCH_MUL 20
 #define SEEDS_PER_CHAIN 1
+
 #define READ_LEN 151
 
-#define SEQ_LEN8 128
+#define SEQ_LEN8 128   // redundant??
+
 #define MAX_LINE_LEN 256
+#define CACHE_LINE 16        // 16 INT32
+#define ALIGN_OFF 1
 
 #define MAX_THREADS 256
-
-#define ROOT_ (myrank == 0)
 #define LIM_R 128
 #define LIM_C 128
 
+#define SA_COMPRESSION 1
+#define SA_COMPX 03 // (= power of 2)
+#define SA_COMPX_MASK 0x7    // 0x7 or 0x3 or 0x1
 
 /*** Runtime profiling macros ***/
 #define INDEX 0

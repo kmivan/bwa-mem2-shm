@@ -1,8 +1,8 @@
 /*************************************************************************************
                            The MIT License
 
+   Copyright Attractive Chaos <attractor@live.co.uk>
    BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
-   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -24,17 +24,19 @@
    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
 
-Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@intel.com>;
+   Modified Copyright (C) 2019  Intel Corporation, Heng Li.
+   Authors: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@intel.com>;
          Heng Li <hli@jimmy.harvard.edu>.
 *****************************************************************************************/
 
 #include "kthread.h"
-// #include <omp.h>
 #include <stdio.h>
 
-extern uint64_t proc_freq, tprof[LIM_R][LIM_C];
-extern int nthreads, affy[256];
-int g_itr;
+#if AFF && (__linux__)
+extern int affy[256];
+#endif
+
+extern uint64_t tprof[LIM_R][LIM_C];
 
 static inline long steal_work(kt_for_t *t)
 {
@@ -47,69 +49,54 @@ static inline long steal_work(kt_for_t *t)
 	return k*BATCH_SIZE >= t->n? -1 : k;
 }
 
-#if 0  // GSHARED
+/******** Current working code *********/
 static void *ktf_worker(void *data)
 {
 	ktf_worker_t *w = (ktf_worker_t*)data;
-	long i, val = 0;
-	for (;;) {
-		// i = __sync_fetch_and_add(&w->i, w->t->n_threads);
-		i = __sync_fetch_and_add(&g_itr, 1);
-		int st = i * BATCH_SIZE;
-		if (st >= w->t->n) break;
-		int ed = (i + 1) * BATCH_SIZE < w->t->n? (i + 1) * BATCH_SIZE : w->t->n;
-		w->t->func(w->t->data, st, ed-st, w->i);
-	}
-	pthread_exit(0);
-}
-
-#else
-
-static void *ktf_worker(void *data)
-{
-	ktf_worker_t *w = (ktf_worker_t*)data;
-	long i, val = 0;
+	long i;
 	int tid = w->i;
-#if 0 && (__liunx__)
+
+#if AFF && (__liunx__)
 	fprintf(stderr, "i: %d, CPU: %d\n", tid , sched_getcpu());
 #endif
 	
 	for (;;) {
 		i = __sync_fetch_and_add(&w->i, w->t->n_threads);
-		// i = __sync_fetch_and_add(&g_itr, 1);
 		int st = i * BATCH_SIZE;
 		if (st >= w->t->n) break;
 		int ed = (i + 1) * BATCH_SIZE < w->t->n? (i + 1) * BATCH_SIZE : w->t->n;
-		w->t->func(w->t->data, st, ed-st, tid);
+		// w->t->func(w->t->data, st, ed-st, tid);
+        w->t->func(w->t->data, st, ed-st, w - w->t->w);
 	}
 
 	while ((i = steal_work(w->t)) >= 0) {
 		int st = i * BATCH_SIZE;
 		int ed = (i + 1) * BATCH_SIZE < w->t->n? (i + 1) * BATCH_SIZE : w->t->n;
-		w->t->func(w->t->data, st, ed-st, tid);
+		w->t->func(w->t->data, st, ed-st, w - w->t->w);
 	}
 	pthread_exit(0);
 }
-#endif
 
 void kt_for(void (*func)(void*, int, int, int), void *data, int n)
 {
 	int i;
 	kt_for_t t;
 	pthread_t *tid;
-	t.func = func, t.data = data, t.n_threads = nthreads, t.n = n;
-	t.w = (ktf_worker_t*) malloc (nthreads * sizeof(ktf_worker_t));
-	tid = (pthread_t*) malloc (nthreads * sizeof(pthread_t));
-	for (i = 0; i < nthreads; ++i)
+	worker_t *w = (worker_t*) data;
+	t.func = func, t.data = data, t.n_threads = w->nthreads, t.n = n;
+	t.w = (ktf_worker_t*) malloc (t.n_threads * sizeof(ktf_worker_t));
+    assert(t.w != NULL);
+	tid = (pthread_t*) malloc (t.n_threads * sizeof(pthread_t));
+    assert(tid != NULL);
+	for (i = 0; i < t.n_threads; ++i)
 		t.w[i].t = &t, t.w[i].i = i;
 
 	pthread_attr_t attr;
     pthread_attr_init(&attr);
 	
 	// printf("getcpu: %d\n", sched_getcpu());
-	g_itr = 0;
-	for (i = 0; i < nthreads; ++i) {
-#if 0 && (__linux__)
+	for (i = 0; i < t.n_threads; ++i) {
+#if AFF && (__linux__)
 		cpu_set_t cpus;
 		CPU_ZERO(&cpus);
 		// CPU_SET(i, &cpus);
@@ -120,8 +107,9 @@ void kt_for(void (*func)(void*, int, int, int), void *data, int n)
 		pthread_create(&tid[i], NULL, ktf_worker, &t.w[i]);
 #endif
 	}
-	for (i = 0; i < nthreads; ++i) pthread_join(tid[i], 0);
+	for (i = 0; i < t.n_threads; ++i) pthread_join(tid[i], 0);
 
+    pthread_attr_destroy(&attr);
     free(t.w);
 	free(tid);
 }

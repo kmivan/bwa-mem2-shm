@@ -2,7 +2,7 @@
                            The MIT License
 
    BWA-MEM2  (Sequence alignment using Burrows-Wheeler Transform),
-   Copyright (C) 2019  Vasimuddin Md, Sanchit Misra, Intel Corporation, Heng Li.
+   Copyright (C) 2019  Intel Corporation, Heng Li.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -32,6 +32,15 @@ Contacts: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <limits.h>
+#include <assert.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+#include "safe_str_lib.h"
+#ifdef __cplusplus
+}
+#endif
 
 #define SIMD_SSE     0x1
 #define SIMD_SSE2    0x2
@@ -44,21 +53,21 @@ Contacts: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@
 #define SIMD_AVX512F 0x100
 #define SIMD_AVX512BW 0x200
 
-//#ifndef _MSC_VER
-//// adapted from https://github.com/01org/linux-sgx/blob/master/common/inc/internal/linux/cpuid_gnu.h
-//void __cpuidex(int cpuid[4], int func_id, int subfunc_id)
-//{
-//#if defined(__x86_64__)
-//	__asm__ volatile ("cpuid"
-//			: "=a" (cpuid[0]), "=b" (cpuid[1]), "=c" (cpuid[2]), "=d" (cpuid[3])
-//			: "0" (func_id), "2" (subfunc_id));
-//#else // on 32bit, ebx can NOT be used as PIC code
-//	__asm__ volatile ("xchgl %%ebx, %1; cpuid; xchgl %%ebx, %1"
-//			: "=a" (cpuid[0]), "=r" (cpuid[1]), "=c" (cpuid[2]), "=d" (cpuid[3])
-//			: "0" (func_id), "2" (subfunc_id));
-//#endif
-//}
-//#endif
+#ifndef _MSC_VER
+// adapted from https://github.com/01org/linux-sgx/blob/master/common/inc/internal/linux/cpuid_gnu.h
+void __cpuidex(int cpuid[4], int func_id, int subfunc_id)
+{
+#if defined(__x86_64__)
+	__asm__ volatile ("cpuid"
+			: "=a" (cpuid[0]), "=b" (cpuid[1]), "=c" (cpuid[2]), "=d" (cpuid[3])
+			: "0" (func_id), "2" (subfunc_id));
+#else // on 32bit, ebx can NOT be used as PIC code
+	__asm__ volatile ("xchgl %%ebx, %1; cpuid; xchgl %%ebx, %1"
+			: "=a" (cpuid[0]), "=r" (cpuid[1]), "=c" (cpuid[2]), "=d" (cpuid[3])
+			: "0" (func_id), "2" (subfunc_id));
+#endif
+}
+#endif
 
 static int x86_simd(void)
 {
@@ -95,30 +104,33 @@ static int exe_path(const char *exe, int max, char buf[], int *base_st)
 	if (base_st) *base_st = last_slash + 1;
 	if (exe[0] == '/') {
 		if (max < last_slash + 2) return -1;
-		strncpy(buf, exe, last_slash + 1);
+		strncpy_s(buf, max, exe, last_slash + 1);
 		buf[last_slash + 1] = 0;
 	} else if (last_slash >= 0) { // actually, can't be 0
 		char *p;
-		int abs_len;
+		//int abs_len;
 		p = getcwd(buf, max);
 		if (p == 0) return -1;
-		abs_len = strlen(buf);
-		if (max < abs_len + 3 + last_slash) return -1;
-		buf[abs_len] = '/';
-		strncpy(buf + abs_len + 1, exe, last_slash + 1);
-		buf[abs_len + last_slash + 2] = 0;
+		//abs_len = strlen(buf);
+		//if (max < abs_len + 3 + last_slash) return -1;
+		//buf[abs_len] = '/';
+        strcat_s(buf, max, "/");
+		//strncpy_s(buf + abs_len + 1, max - (abs_len + 1), exe, last_slash + 1);
+        strncat_s(buf, max, exe, last_slash + 1);
+		//buf[abs_len + last_slash + 2] = 0;
 	} else {
 		char *env, *p, *q, *tmp;
-		int env_len, found = 0, ret;
+		int env_len, found = 0;
 		struct stat st;
 		env = getenv("PATH");
+        assert(env != NULL);
 		env_len = strlen(env);
-		tmp = (char*)malloc(env_len + len + 2);
+		if ((tmp = (char*)malloc(env_len + len + 2)) == NULL) { fprintf( stderr, "ERROR: out of memory %s", __func__); exit(EXIT_FAILURE);}
 		for (p = q = env;; ++p) {
 			if (*p == ':' || *p == 0) {
-				strncpy(tmp, q, p - q);
+				strncpy_s(tmp, env_len + len + 2, q, p - q);
 				tmp[p - q] = '/';
-				strcpy(tmp + (p - q + 1), exe);
+				strcpy_s(tmp + (p - q + 1), env_len + len + 2 - (p - q + 1), exe);
 				if (stat(tmp, &st) == 0 && (st.st_mode & S_IXUSR)) {
 					found = 1;
 					break;
@@ -137,40 +149,54 @@ static int exe_path(const char *exe, int max, char buf[], int *base_st)
 	return ret;
 }
 
-static void test_and_launch(char *argv[], int prefix_len, char *prefix, const char *simd) // we assume prefix is long enough
+static void test_and_launch(char *argv[], char *prefix, const char *simd) // we assume prefix is long enough
 {
 	struct stat st;
-	strcpy(prefix + prefix_len, simd);
-	if (stat(prefix, &st) == 0 && (st.st_mode & S_IXUSR)) {
-		//fprintf(stderr, "Launching executable \"%s\"\n", prefix);
-		execv(prefix, argv);
-	}
+    int prefix_len = strlen(prefix);
+	strcat_s(prefix, PATH_MAX, simd);
+    fprintf(stderr, "Looking to launch executable \"%s\", simd = %s\n", prefix, simd);
+    if(stat(prefix, &st) == 0)
+    {
+        if (st.st_mode & S_IXUSR) {
+            fprintf(stderr, "Launching executable \"%s\"\n", prefix);
+            execv(prefix, argv);
+        }
+        else
+        {
+            fprintf(stderr, "(st.st_mode & S_IXUSR) = %d, can not run executable: %s\n", st.st_mode & S_IXUSR, prefix);
+        }
+    }
+    else
+    {
+        fprintf(stderr, "stat(prefix, &st) = %d, can not run executable: %s\n", stat(prefix, &st), prefix);
+    }
+    prefix[prefix_len] = 0;
 }
 
 int main(int argc, char *argv[])
 {
-	char buf[1024], *prefix, *argv0 = argv[0];
-	int ret, buf_len, prefix_len, base_st, simd;
-	ret = exe_path(argv0, 1024, buf, &base_st);
+	char buf[PATH_MAX], *prefix, *argv0 = argv[0];
+	int ret, base_st, simd;
+	//int prefix_len;
+	ret = exe_path(argv0, PATH_MAX, buf, &base_st);
 	if (ret != 0) {
 		fprintf(stderr, "ERROR: prefix is too long!\n");
 		return 1;
 	}
 	//printf("%s\n", buf);
-	buf_len = strlen(buf);
-	prefix = (char*)malloc(buf_len + (strlen(argv0) - base_st) + 20);
-	strcpy(prefix, buf);
-	strcpy(prefix + buf_len, &argv0[base_st]);
-	prefix_len = strlen(prefix);
+	if ((prefix = (char*)malloc(PATH_MAX)) == NULL) {
+		fprintf(stderr, "ERROR: out of memory.\n");
+		return 1;
+        }
+	strcpy_s(prefix, PATH_MAX, buf);
+	strcat_s(prefix, PATH_MAX, &argv0[base_st]);
+	//prefix_len = strlen(prefix);
 	simd = x86_simd();
-	if (simd & SIMD_AVX512BW) test_and_launch(argv, prefix_len, prefix, ".avx512bw");
-	if (simd & SIMD_AVX512F) test_and_launch(argv, prefix_len, prefix, ".avx512f");
-	if (simd & SIMD_AVX2) test_and_launch(argv, prefix_len, prefix, ".avx2");
-	if (simd & SIMD_AVX) test_and_launch(argv, prefix_len, prefix, ".avx");
-	if (simd & SIMD_SSE4_2) test_and_launch(argv, prefix_len, prefix, ".sse4.2");
-	if (simd & SIMD_SSE4_1) test_and_launch(argv, prefix_len, prefix, ".sse4.1");
-	if (simd & SIMD_SSE2) test_and_launch(argv, prefix_len, prefix, ".sse2");
-	if (simd & SIMD_SSE) test_and_launch(argv, prefix_len, prefix, ".sse");
+	if (simd & SIMD_AVX512BW) test_and_launch(argv, prefix, ".avx512bw");
+	if (simd & SIMD_AVX2) test_and_launch(argv, prefix, ".avx2");
+	if (simd & SIMD_AVX) test_and_launch(argv, prefix, ".avx");
+	if (simd & SIMD_SSE4_2) test_and_launch(argv, prefix, ".sse42");
+	if (simd & SIMD_SSE4_1) test_and_launch(argv, prefix, ".sse41");
 	free(prefix);
 	fprintf(stderr, "ERROR: fail to find the right executable\n");
 	return 2;

@@ -21,9 +21,12 @@
    ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
    CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
    SOFTWARE.
+
+   Modified Copyright (C) 2019 Intel Corporation, Heng Li.
+   Contacts: Vasimuddin Md <vasimuddin.md@intel.com>; Sanchit Misra <sanchit.misra@intel.com>;
+   Heng Li <hli@jimmy.harvard.edu> 
 */
 
-/* Contact: Heng Li <hli@jimmy.harvard.edu> */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,19 +38,19 @@
 #include "bwa.h"
 #include "bwt.h"
 #include "utils.h"
-#include "bwtbuild.h"
+#include "FMI_search.h"
 
 int bwa_index(int argc, char *argv[]) // the "index" command
 {
 	int c;
-	char *prefix = 0, *str;
+	char *prefix = 0;
 	while ((c = getopt(argc, argv, "p:")) >= 0) {
 		if (c == 'p') prefix = optarg;
 		else return 1;
 	}
 
 	if (optind + 1 > argc) {
-		fprintf(stderr, "Usage: bwa index [-p prefix] <in.fasta>\n");
+		fprintf(stderr, "Usage: bwa-mem2 index [-p prefix] <in.fasta>\n");
 		return 1;
 	}
 	if (prefix == 0) prefix = argv[optind];
@@ -69,7 +72,9 @@ int bwa_idx_build(const char *fa, const char *prefix)
 		l_pac = bns_fasta2bntseq(fp, prefix, 1);
 		fprintf(stderr, "%.2f sec\n", (float)(clock() - t) / CLOCKS_PER_SEC);
 		err_gzclose(fp);
-        build_index(prefix);
+        FMI_search *fmi = new FMI_search(prefix);
+        fmi->build_index();
+        delete fmi;
 	}
 	return 0;
 }
