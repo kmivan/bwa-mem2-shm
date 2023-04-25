@@ -72,7 +72,7 @@ int bwa_idx_build(const char *fa, const char *prefix)
 		l_pac = bns_fasta2bntseq(fp, prefix, 1);
 		fprintf(stderr, "%.2f sec\n", (float)(clock() - t) / CLOCKS_PER_SEC);
 		err_gzclose(fp);
-        FMI_search *fmi = new FMI_search(prefix);
+        FMI_search *fmi = new FMI_search(prefix, false);
         fmi->build_index();
         delete fmi;
 	}

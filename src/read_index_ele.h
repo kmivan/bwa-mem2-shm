@@ -59,7 +59,7 @@ public:
 	
 	indexEle();
 	~indexEle();
-	void bwa_idx_load_ele(const char *hint, int which);
+	void bwa_idx_load_ele(const char *hint, int which, bool use_shared_memory);
 	char *bwa_idx_infer_prefix(const char *hint);	
 };
 #endif

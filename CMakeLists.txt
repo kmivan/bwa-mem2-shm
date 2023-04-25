@@ -23,12 +23,10 @@ endforeach()
 foreach(arch IN LISTS archs)
     add_compile_options(${common_options} -m${arch})
     add_executable(${PROJECT_NAME}.${arch} ${SRC})
-    target_link_libraries(${PROJECT_NAME}.${arch} stdc++ pthread m z safestring_static rt)
+    target_link_libraries(${PROJECT_NAME}.${arch} pthread m z safestring_static rt)
 endforeach()
-
 add_executable(${PROJECT_NAME} src/runsimd.cpp)
-target_link_libraries(${PROJECT_NAME} stdc++ safestring_static)
-
+target_link_libraries(${PROJECT_NAME} safestring_static)
 
 set(install_targets ${PROJECT_NAME})
 foreach(arch IN LISTS archs)

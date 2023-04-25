@@ -57,7 +57,7 @@ indexEle::~indexEle()
     free(idx);
 }
 
-void indexEle::bwa_idx_load_ele(const char *hint, int which)
+void indexEle::bwa_idx_load_ele(const char *hint, int which, bool use_shm)
 {
     char *prefix;
     int l_hint = strlen(hint);
@@ -70,7 +70,7 @@ void indexEle::bwa_idx_load_ele(const char *hint, int which)
     // idx = (bwaidx_fm_t*) calloc(1, sizeof(bwaidx_fm_t));
     if (which & BWA_IDX_BNS) {
         int i, c;
-        idx->bns = bns_restore(prefix);
+        idx->bns = bns_restore(prefix, use_shm);
         if (idx->bns == 0) {
             printf("Error!! : [%s] bns is NULL!!\n", __func__);
             exit(EXIT_FAILURE);

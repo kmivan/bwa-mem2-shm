@@ -43,6 +43,8 @@
 KSEQ_DECLARE(gzFile)
 
 #include "khash.h"
+#include "shared_memory.h"
+
 KHASH_MAP_INIT_STR(str, int)
 
 #ifdef USE_MALLOC_WRAPPERS
@@ -185,12 +187,17 @@ bntseq_t *bns_restore_core(const char *ann_filename, const char* amb_filename, c
 	err_fatal(__func__, "Parse error reading %s\n", fname);
 }
 
-bntseq_t *bns_restore(const char *prefix)
+bntseq_t *bns_restore(const char *prefix, bool use_shm)
 {  
 	char ann_filename[PATH_MAX], amb_filename[PATH_MAX], pac_filename[PATH_MAX], alt_filename[PATH_MAX];
 	FILE *fp;
 	bntseq_t *bns;
 	//assert(strlen(prefix) + 4 < 1024);
+    string shm_prefix;
+    if (use_shm) {
+        shm_prefix = get_others_prefix(prefix);
+        prefix = shm_prefix.c_str();
+    }
 	strcpy_s(ann_filename, PATH_MAX, prefix); strcat_s(ann_filename, PATH_MAX, ".ann");
 	strcpy_s(amb_filename, PATH_MAX, prefix); strcat_s(amb_filename, PATH_MAX, ".amb");
 	strcpy_s(pac_filename, PATH_MAX, prefix); strcat_s(pac_filename, PATH_MAX, ".pac");

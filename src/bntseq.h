@@ -70,7 +70,7 @@ extern "C" {
 #endif
 
 	void bns_dump(const bntseq_t *bns, const char *prefix);
-	bntseq_t *bns_restore(const char *prefix);
+	bntseq_t *bns_restore(const char *prefix, bool use_shm);
 	bntseq_t *bns_restore_core(const char *ann_filename, const char* amb_filename, const char* pac_filename);
 	void bns_destroy(bntseq_t *bns);
 	int64_t bns_fasta2bntseq(gzFile fp_fa, const char *prefix, int for_only);

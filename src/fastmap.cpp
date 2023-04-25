@@ -638,7 +638,7 @@ int main_mem(int argc, char *argv[])
 
     /* Parse input arguments */
     // comment: added option '5' in the list
-    while ((c = getopt(argc, argv, "51qpaMCSPVYjkb:c:v:s:r:t:R:A:B:O:E:U:w:L:d:T:Q:D:m:I:N:W:x:G:h:y:K:X:H:o:f:")) >= 0)
+    while ((c = getopt(argc, argv, "51qpaMCSPVYjbk:c:v:s:r:t:R:A:B:O:E:U:w:L:d:T:Q:D:m:I:N:W:x:G:h:y:K:X:H:o:f:")) >= 0)
     {
         if (c == 'k') opt->min_seed_len = atoi(optarg), opt0.min_seed_len = 1;
         else if (c == 'b') opt->use_shared_memory = true;
@@ -857,13 +857,16 @@ int main_mem(int argc, char *argv[])
     fprintf(stderr, "* Reading reference genome..\n");
 
     char binary_seq_file[PATH_MAX];
-    strcpy_s(binary_seq_file, PATH_MAX, argv[optind]);
-    strcat_s(binary_seq_file, PATH_MAX, ".0123");
+    strcpy_s(binary_seq_file, PATH_MAX, "/dev/shm/bwa-mem2-index/");
+    strcat_s(binary_seq_file, PATH_MAX, argv[optind]);
+    strcat_s(binary_seq_file, PATH_MAX, "/ref.0123");
     //sprintf(binary_seq_file, "%s.0123", argv[optind]);
     if (opt->use_shared_memory)
     {
-        fprintf(stderr, "Binary seq file (from shared memory)\n");
-        ref_string = (uint8_t*) get_file(argv[optind], "ref.0123");
+        fprintf(stderr, "Binary seq file from shared memory\n");
+        aux.ref_string = get_bin_seq(argv[optind]);
+        uint64_t timer  = __rdtsc();
+        tprof[REF_IO][0] += timer - tim;
     }
     else {
         fprintf(stderr, "* Binary seq file = %s\n", binary_seq_file);

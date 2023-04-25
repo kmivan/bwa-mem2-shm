@@ -138,6 +138,8 @@ mem_opt_t *mem_opt_init()
     o->min_chain_weight = 0;
     o->max_chain_extend = 1<<30;
     o->mapQ_coef_len = 50; o->mapQ_coef_fac = log(o->mapQ_coef_len);
+
+    o->use_shared_memory = false;
     bwa_fill_scmat(o->a, o->b, o->mat);
     return o;
 }

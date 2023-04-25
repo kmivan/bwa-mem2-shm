@@ -32,6 +32,7 @@ Authors: Sanchit Misra <sanchit.misra@intel.com>; Vasimuddin Md <vasimuddin.md@i
 #include "FMI_search.h"
 #include "memcpy_bwamem.h"
 #include "profiling.h"
+#include "shared_memory.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,7 +42,7 @@ extern "C" {
 }
 #endif
 
-FMI_search::FMI_search(const char *fname, , bool use_shared_memory)
+FMI_search::FMI_search(const char *fname, bool use_shared_memory)
 {
     fprintf(stderr, "* Entering FMI_search\n");
     //strcpy(file_name, fname);
@@ -58,12 +59,14 @@ FMI_search::FMI_search(const char *fname, , bool use_shared_memory)
 
 FMI_search::~FMI_search()
 {
-    if(sa_ms_byte)
-        _mm_free(sa_ms_byte);
-    if(sa_ls_word)
-        _mm_free(sa_ls_word);
-    if(cp_occ)
-        _mm_free(cp_occ);
+    if (!use_shared_memory) {
+        if (sa_ms_byte)
+            _mm_free(sa_ms_byte);
+        if (sa_ls_word)
+            _mm_free(sa_ls_word);
+        if (cp_occ)
+            _mm_free(cp_occ);
+    }
     if(one_hot_mask_array)
         _mm_free(one_hot_mask_array);
 }
@@ -272,7 +275,7 @@ int FMI_search::build_fm_index(const char *ref_file_name, char *binary_seq, int6
             pos++;
         }
     }
-    fprintf(stderr, "pos: %d, ref_seq_len__: %ld\n", pos, ref_seq_len >> SA_COMPX);
+    fprintf(stderr, "pos: %ld, ref_seq_len__: %ld\n", pos, ref_seq_len >> SA_COMPX);
     outstream.write((char*)sa_ms_byte, ((ref_seq_len >> SA_COMPX) + 1) * sizeof(int8_t));
     outstream.write((char*)sa_ls_word, ((ref_seq_len >> SA_COMPX) + 1) * sizeof(uint32_t));
 
@@ -394,71 +397,91 @@ void FMI_search::load_index()
         one_hot_mask_array[i] = (one_hot_mask_array[i - 1] >> 1) | base;
     }
 
-    char *ref_file_name = file_name;
-    //beCalls = 0;
-    char cp_file_name[PATH_MAX];
-    strcpy_s(cp_file_name, PATH_MAX, ref_file_name);
-    strcat_s(cp_file_name, PATH_MAX, CP_FILENAME_SUFFIX);
-
-    // Read the BWT and FM index of the reference sequence
-    FILE *cpstream = NULL;
-    cpstream = fopen(cp_file_name,"rb");
-    if (cpstream == NULL)
+    if (use_shared_memory)
     {
-        fprintf(stderr, "ERROR! Unable to open the file: %s\n", cp_file_name);
-        exit(EXIT_FAILURE);
+        IndexShmInfo info;
+        get_index(file_name, &info);
+        reference_seq_len = info.reference_seq_len;
+        memcpy(count, &info.count, sizeof(int64_t) * 5);
+        cp_occ = info.occ;
+        sa_ms_byte = info.sa_ms_byte;
+        sa_ls_word = info.sa_ls_word;
+        sentinel_index = info.sentinel_index;
+
+        int64_t ii = 0;
+        for (ii = 0; ii < 5; ii++)// update read count structure
+        {
+            count[ii] = count[ii] + 1;
+        }
+
+        fprintf(stderr, "* Reference seq len for bi-index = %ld\n", reference_seq_len);
+        fprintf(stderr, "* sentinel-index: %ld\n", sentinel_index);
     }
     else
     {
-        fprintf(stderr, "* Index file found. Loading index from %s\n", cp_file_name);
+        char *ref_file_name = file_name;
+        //beCalls = 0;
+        char cp_file_name[PATH_MAX];
+        strcpy_s(cp_file_name, PATH_MAX, ref_file_name);
+        strcat_s(cp_file_name, PATH_MAX, CP_FILENAME_SUFFIX);
+
+        // Read the BWT and FM index of the reference sequence
+        FILE *cpstream = NULL;
+        cpstream = fopen(cp_file_name, "rb");
+        if (cpstream == NULL) {
+            fprintf(stderr, "ERROR! Unable to open the file: %s\n", cp_file_name);
+            exit(EXIT_FAILURE);
+        } else {
+            fprintf(stderr, "* Index file found. Loading index from %s\n", cp_file_name);
+        }
+
+        err_fread_noeof(&reference_seq_len, sizeof(int64_t), 1, cpstream);
+        assert(reference_seq_len > 0);
+        assert(reference_seq_len <= 0x7fffffffffL);
+
+        fprintf(stderr, "* Reference seq len for bi-index = %ld\n", reference_seq_len);
+
+        // create checkpointed occ
+        int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
+        cp_occ = NULL;
+
+        err_fread_noeof(&count[0], sizeof(int64_t), 5, cpstream);
+        if ((cp_occ = (CP_OCC *) _mm_malloc(cp_occ_size * sizeof(CP_OCC), 64)) == NULL) {
+            fprintf(stderr, "ERROR! unable to allocated cp_occ memory\n");
+            exit(EXIT_FAILURE);
+        }
+
+        err_fread_noeof(cp_occ, sizeof(CP_OCC), cp_occ_size, cpstream);
+        int64_t ii = 0;
+        for (ii = 0; ii < 5; ii++)// update read count structure
+        {
+            count[ii] = count[ii] + 1;
+        }
+
+#if SA_COMPRESSION
+
+        int64_t reference_seq_len_ = (reference_seq_len >> SA_COMPX) + 1;
+        sa_ms_byte = (int8_t *) _mm_malloc(reference_seq_len_ * sizeof(int8_t), 64);
+        sa_ls_word = (uint32_t *) _mm_malloc(reference_seq_len_ * sizeof(uint32_t), 64);
+        err_fread_noeof(sa_ms_byte, sizeof(int8_t), reference_seq_len_, cpstream);
+        err_fread_noeof(sa_ls_word, sizeof(uint32_t), reference_seq_len_, cpstream);
+
+#else
+
+        sa_ms_byte = (int8_t *)_mm_malloc(reference_seq_len * sizeof(int8_t), 64);
+        sa_ls_word = (uint32_t *)_mm_malloc(reference_seq_len * sizeof(uint32_t), 64);
+        err_fread_noeof(sa_ms_byte, sizeof(int8_t), reference_seq_len, cpstream);
+        err_fread_noeof(sa_ls_word, sizeof(uint32_t), reference_seq_len, cpstream);
+
+#endif
+
+        sentinel_index = -1;
+#if SA_COMPRESSION
+        err_fread_noeof(&sentinel_index, sizeof(int64_t), 1, cpstream);
+        fprintf(stderr, "* sentinel-index: %ld\n", sentinel_index);
+#endif
+        fclose(cpstream);
     }
-
-    err_fread_noeof(&reference_seq_len, sizeof(int64_t), 1, cpstream);
-    assert(reference_seq_len > 0);
-    assert(reference_seq_len <= 0x7fffffffffL);
-
-    fprintf(stderr, "* Reference seq len for bi-index = %ld\n", reference_seq_len);
-
-    // create checkpointed occ
-    int64_t cp_occ_size = (reference_seq_len >> CP_SHIFT) + 1;
-    cp_occ = NULL;
-
-    err_fread_noeof(&count[0], sizeof(int64_t), 5, cpstream);
-    if ((cp_occ = (CP_OCC *)_mm_malloc(cp_occ_size * sizeof(CP_OCC), 64)) == NULL) {
-        fprintf(stderr, "ERROR! unable to allocated cp_occ memory\n");
-        exit(EXIT_FAILURE);
-    }
-
-    err_fread_noeof(cp_occ, sizeof(CP_OCC), cp_occ_size, cpstream);
-    int64_t ii = 0;
-    for(ii = 0; ii < 5; ii++)// update read count structure
-    {
-        count[ii] = count[ii] + 1;
-    }
-
-    #if SA_COMPRESSION
-
-    int64_t reference_seq_len_ = (reference_seq_len >> SA_COMPX) + 1;
-    sa_ms_byte = (int8_t *)_mm_malloc(reference_seq_len_ * sizeof(int8_t), 64);
-    sa_ls_word = (uint32_t *)_mm_malloc(reference_seq_len_ * sizeof(uint32_t), 64);
-    err_fread_noeof(sa_ms_byte, sizeof(int8_t), reference_seq_len_, cpstream);
-    err_fread_noeof(sa_ls_word, sizeof(uint32_t), reference_seq_len_, cpstream);
-
-    #else
-
-    sa_ms_byte = (int8_t *)_mm_malloc(reference_seq_len * sizeof(int8_t), 64);
-    sa_ls_word = (uint32_t *)_mm_malloc(reference_seq_len * sizeof(uint32_t), 64);
-    err_fread_noeof(sa_ms_byte, sizeof(int8_t), reference_seq_len, cpstream);
-    err_fread_noeof(sa_ls_word, sizeof(uint32_t), reference_seq_len, cpstream);
-
-    #endif
-
-    sentinel_index = -1;
-    #if SA_COMPRESSION
-    err_fread_noeof(&sentinel_index, sizeof(int64_t), 1, cpstream);
-    fprintf(stderr, "* sentinel-index: %ld\n", sentinel_index);
-    #endif
-    fclose(cpstream);
 
     int64_t x;
     #if !SA_COMPRESSION
@@ -487,9 +510,9 @@ void FMI_search::load_index()
     }
     fprintf(stderr, "\n");
 
-    fprintf(stderr, "* Reading other elements of the index from files %s\n",
-            ref_file_name);
-    bwa_idx_load_ele(ref_file_name, BWA_IDX_ALL);
+    fprintf(stderr, "* Reading other elements of the index %s\n",
+            file_name);
+    bwa_idx_load_ele(file_name, BWA_IDX_ALL, use_shared_memory);
 
     fprintf(stderr, "* Done reading Index!!\n");
 }
@@ -1308,7 +1331,7 @@ void FMI_search::get_sa_entries_prefetch(SMEM *smemArray, int64_t *coordArray,
         map_pos[j] = map_ar[i];
         offset[j] = 0;
 
-        if (pos & SA_COMPX_MASK == 0) {
+        if ((pos & SA_COMPX_MASK) == 0) {
             _mm_prefetch(&sa_ms_byte[pos >> SA_COMPX], _MM_HINT_T0);
             _mm_prefetch(&sa_ls_word[pos >> SA_COMPX], _MM_HINT_T0);
         }
@@ -1345,7 +1368,7 @@ void FMI_search::get_sa_entries_prefetch(SMEM *smemArray, int64_t *coordArray,
                     map_pos[k] = map_ar[i++];
                     offset[k] = 0;
 
-                    if (pos & SA_COMPX_MASK == 0) {
+                    if ((pos & SA_COMPX_MASK) == 0) {
                         _mm_prefetch(&sa_ms_byte[pos >> SA_COMPX], _MM_HINT_T0);
                         _mm_prefetch(&sa_ls_word[pos >> SA_COMPX], _MM_HINT_T0);
                     }
@@ -1359,7 +1382,7 @@ void FMI_search::get_sa_entries_prefetch(SMEM *smemArray, int64_t *coordArray,
             }
             else {
                 working_set[k] = sp;
-                if (sp & SA_COMPX_MASK == 0) {
+                if ((sp & SA_COMPX_MASK) == 0) {
                     _mm_prefetch(&sa_ms_byte[sp >> SA_COMPX], _MM_HINT_T0);
                     _mm_prefetch(&sa_ls_word[sp >> SA_COMPX], _MM_HINT_T0);
                 }

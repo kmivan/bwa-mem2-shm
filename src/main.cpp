@@ -103,6 +103,11 @@ int main(int argc, char* argv[])
         /** Enable this return to avoid printing of the runtime profiling **/
         //return ret;
     }
+    else if (strcmp(argv[1], "shm") == 0)
+    {
+        shm(argc-1, argv+1);
+        return 0;
+    }
     else if (strcmp(argv[1], "version") == 0)
     {
         puts(PACKAGE_VERSION);
