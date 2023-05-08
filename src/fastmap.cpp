@@ -562,7 +562,7 @@ static void usage(const mem_opt_t *opt)
     fprintf(stderr, "Usage: bwa-mem2-shm mem [options] <idxbase> <in1.fq> [in2.fq]\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  Algorithm options:\n");
-    fprintf(stderr, "    -b            Use shared memory\n");
+//    fprintf(stderr, "    -b            Use shared memory\n");
     fprintf(stderr, "    -o STR        Output SAM file name\n");
     fprintf(stderr, "    -t INT        number of threads [%d]\n", opt->n_threads);
     fprintf(stderr, "    -k INT        minimum seed length [%d]\n", opt->min_seed_len);
@@ -638,10 +638,10 @@ int main_mem(int argc, char *argv[])
 
     /* Parse input arguments */
     // comment: added option '5' in the list
-    while ((c = getopt(argc, argv, "51qpaMCSPVYjbk:c:v:s:r:t:R:A:B:O:E:U:w:L:d:T:Q:D:m:I:N:W:x:G:h:y:K:X:H:o:f:")) >= 0)
+    while ((c = getopt(argc, argv, "51qpaMCSPVYjk:c:v:s:r:t:R:A:B:O:E:U:w:L:d:T:Q:D:m:I:N:W:x:G:h:y:K:X:H:o:f:")) >= 0)
     {
         if (c == 'k') opt->min_seed_len = atoi(optarg), opt0.min_seed_len = 1;
-        else if (c == 'b') opt->use_shared_memory = true;
+//        else if (c == 'b') opt->use_shared_memory = true;
         else if (c == '1') no_mt_io = 1;
         else if (c == 'x') mode = optarg;
         else if (c == 'w') opt->w = atoi(optarg), opt0.w = 1;
@@ -847,6 +847,13 @@ int main_mem(int argc, char *argv[])
     /* Load bwt2/FMI index */
     uint64_t tim = __rdtsc();
 
+    constexpr char SHM_ID_PREFIX[] = "SHM::";
+    constexpr int SHM_ID_PREFIX_LEN = sizeof(SHM_ID_PREFIX) - 1;
+    if (!strncmp(argv[optind], SHM_ID_PREFIX, SHM_ID_PREFIX_LEN)) {
+        argv[optind] += SHM_ID_PREFIX_LEN;
+        opt->use_shared_memory = true;
+    }
+
     fprintf(stderr, "* Ref file: %s\n", argv[optind]);
     aux.fmi = new FMI_search(argv[optind], opt->use_shared_memory);
     aux.fmi->load_index();
@@ -857,9 +864,8 @@ int main_mem(int argc, char *argv[])
     fprintf(stderr, "* Reading reference genome..\n");
 
     char binary_seq_file[PATH_MAX];
-    strcpy_s(binary_seq_file, PATH_MAX, "/dev/shm/bwa-mem2-index/");
-    strcat_s(binary_seq_file, PATH_MAX, argv[optind]);
-    strcat_s(binary_seq_file, PATH_MAX, "/ref.0123");
+    strcpy_s(binary_seq_file, PATH_MAX, argv[optind]);
+    strcat_s(binary_seq_file, PATH_MAX, ".0123");
     //sprintf(binary_seq_file, "%s.0123", argv[optind]);
     if (opt->use_shared_memory)
     {
