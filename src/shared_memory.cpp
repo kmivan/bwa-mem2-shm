@@ -27,6 +27,12 @@ string get_others_prefix(const string &id)
 void *get_file(const string &id, const string &filename)
 {
     string path = shm_file_path(id, filename);
+    if (access(path.c_str(), F_OK) != 0)
+    {
+        cerr << "Not on shared memory: " << id << endl;
+        exit(1);
+    }
+
     ifstream fs(path, ios::binary);
     fs.seekg(0, ios::end);
     long len = fs.tellg();
